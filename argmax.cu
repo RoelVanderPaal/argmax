@@ -18,18 +18,19 @@
  */
 
 // Device code
-extern "C" __global__ void argmax(const double *A, int *B, int rows, int cols) {
+extern "C" __global__ void argmax(const int *in_indexes, const double *in_values, int *out_indexes, double *out_values, int rows, int cols) {
 	extern __shared__ int s[];
 	int *maxindexes = s;
 	double *maxvalues = (double*)&maxindexes[blockDim.x*blockDim.y];
 
 	unsigned int tidx = threadIdx.x;
 	unsigned int tidy = threadIdx.y;
+	unsigned int i = tidx + tidy*blockDim.x;
 
 	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
 	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-	maxindexes[tidx + tidy*blockDim.x] = (x < rows && y < cols) ? tidx : 0;
-	maxvalues[tidx + tidy*blockDim.x] = (x < rows && y < cols) ? A[x + rows*y] : 0;
+	maxindexes[i] = (x < rows && y < cols) ? in_indexes[x + rows*y] : 0;
+	maxvalues[i] = (x < rows && y < cols) ? in_values[x + rows*y] : 0;
 
 	__syncthreads();
 
@@ -38,16 +39,17 @@ extern "C" __global__ void argmax(const double *A, int *B, int rows, int cols) {
 	{
 		if (tidx < s  && x + s < rows && y < cols)
 		{
-			if (maxvalues[tidx + tidy*blockDim.x +s] > maxvalues[tidx + tidy*blockDim.x]) {
-				maxvalues[tidx + tidy*blockDim.x] = maxvalues[tidx + tidy*blockDim.x + s];
-				maxindexes[tidx + tidy*blockDim.x] = maxindexes[tidx + tidy*blockDim.x + s];
+			if (maxvalues[i + s] > maxvalues[i]) {
+				maxvalues[i] = maxvalues[i + s];
+				maxindexes[i] = maxindexes[i + s];
 			}
 		}
 
 		__syncthreads();
 	}
 
-	if (tidx == 0) {
-		B[tidy] = maxindexes[tidy*blockDim.x];
+	if (tidx == 0 && y < cols) {
+		out_indexes[gridDim.x*(tidy+ (blockIdx.y*blockDim.y)) + blockIdx.x] = maxindexes[blockDim.x * tidy];
+		out_values[gridDim.x*(tidy + (blockIdx.y*blockDim.y)) + blockIdx.x] = maxvalues[blockDim.x * tidy];
 	}
 }
